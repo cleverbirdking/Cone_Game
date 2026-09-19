@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Cone_game</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1a1a1a;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    font-family: system-ui, sans-serif;
+  }
+  #gameCanvas {
+    display: block;
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.7);
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="600" height="700"></canvas>
+
+<script>
+"use strict";
+
+// ================== КОНСТАНТЫ ==================
+const WIDTH = 600;
+const HIGHT = 700;
+const row_7 = 7;
+const col_6 = 6;
+const SQUARE_SIZE = Math.floor(WIDTH / col_6);
+
+// Цвета
+const Black = "#000000";
+const White = "#ffffff";
+const Brown = "#8b4513";
+const Yellow = "#ffff00";
+const Highlight_green = "#32cd32";
+const Highlight_red = "#c83232";
+
+// ================== CANVAS ==================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// ================== ЗАГРУЗКА ИЗОБРАЖЕНИЙ ==================
+const images = {};
+let imagesLoaded = 0;
+const totalImages = 14;
+
+function loadImage(key, src) {
+  const img = new Image();
+  img.onload = () => {
+    imagesLoaded++;
+    if (imagesLoaded === totalImages) {
+      init_board();
+      main();
+    }
+  };
+  img.onerror = () => {
+    console.error("Ошибка загрузки: " + src);
+    imagesLoaded++;
+    if (imagesLoaded === totalImages) {
+      init_board();
+      main();
+    }
+  };
+  img.src = src;
+  images[key] = img;
+}
+
+// Загружаем все картинки точно по тем же путям, что и в Python
+loadImage('warrior_white', 'images/voin_white.png');
+loadImage('warrior_black', 'images/voin_black.png');
+loadImage('queen_white',   'images/queen_white.png');
+loadImage('queen_black',   'images/queen_black.png');
+loadImage('guard_white',   'images/guard_white_no_move.png');
+loadImage('guard_black',   'images/guard_black_no_move.png');
+loadImage('guard_white_used', 'images/guard_white_move.png');
+loadImage('guard_black_used', 'images/guard_black_move.png');
+loadImage('clown_white',   'images/clown_white_2_lifes.png');
+loadImage('clown_black',   'images/clown_black_2_lifes.png');
+loadImage('clown_white_1', 'images/clown_white_1_life.png');
+loadImage('clown_black_1', 'images/clown_black_1_life.png');
+loadImage('dragon_white_dia', 'images/dragon_white_dia.png');
+loadImage('dragon_white_ver', 'images/dragon_white_ver.png');
+// Из-за ограничения на 14 картинок — добавим остальные динамически:
+loadImage('dragon_black_dia', 'images/dragon_black_dia.png');
+loadImage('dragon_black_ver', 'images/dragon_black_ver.png');
+
+// ================== СОСТОЯНИЕ ==================
+let board = [];
+let current_player = "white";
+let selected_piece = null;
+let selected_pos = null;
+let valid_moves_cache = [];
+
+const game_state = {
+  white: { mode: 1 },
+  black: { mode: 1 }
+};
+
+// ================== КЛАСС ФИГУРЫ ==================
+class ConeGame {
+  constructor(color, type_name, image_obj) {
+    this.color = color;
+    this.type = type_name;
+    this.image = image_obj;
+    this.has_moved = false;
+    this.row = -1;
+    this.col = -1;
+    this.special_move_used = false;
+    this.lives = (type_name === 'clown') ? 2 : null;
+  }
+}
+
+// ================== ИНИЦИАЛИЗАЦИЯ ДОСКИ ==================
+function init_board() {
+  board = [];
+  for (let r = 0; r < row_7; r++) {
+    board.push(new Array(col_6).fill(null));
+  }
+
+  const R = row_7 - 1;
+
+  // воины
+  board[R][0] = new ConeGame('white', 'warrior', images['warrior_white']);
+  board[R][0].row = R; board[R][0].col = 0;
+  board[R][5] = new ConeGame('white', 'warrior', images['warrior_white']);
+  board[R][5].row = R; board[R][5].col = 5;
+  board[0][0] = new ConeGame('black', 'warrior', images['warrior_black']);
+  board[0][0].row = 0; board[0][0].col = 0;
+  board[0][5] = new ConeGame('black', 'warrior', images['warrior_black']);
+  board[0][5].row = 0; board[0][5].col = 5;
+
+  // стражники
+  board[R][4] = new ConeGame('white', 'guard', images['guard_white']);
+  board[R][4].row = R; board[R][4].col = 4;
+  board[0][1] = new ConeGame('black', 'guard', images['guard_black']);
+  board[0][1].row = 0; board[0][1].col = 1;
+
+  // королевы
+  board[R][3] = new ConeGame('white', 'queen', images['queen_white']);
+  board[R][3].row = R; board[R][3].col = 3;
+  board[0][2] = new ConeGame('black', 'queen', images['queen_black']);
+  board[0][2].row = 0; board[0][2].col = 2;
+
+  // драконы
+  const white_dragon = new ConeGame('white', 'dragon', images['dragon_white_ver']);
+  white_dragon.row = R; white_dragon.col = 2;
+  board[R][2] = white_dragon;
+  const black_dragon = new ConeGame('black', 'dragon', images['dragon_black_ver']);
+  black_dragon.row = 0; black_dragon.col = 3;
+  board[0][3] = black_dragon;
+
+  // шуты
+  board[R][1] = new ConeGame('white', 'clown', images['clown_white']);
+  board[R][1].row = R; board[R][1].col = 1;
+  board[0][4] = new ConeGame('black', 'clown', images['clown_black']);
+  board[0][4].row = 0; board[0][4].col = 4;
+}
+
+// ================== ОТРИСОВКА ==================
+function draw_board() {
+  for (let row = 0; row < row_7; row++) {
+    for (let col = 0; col < col_6; col++) {
+      const color = ((row + col) % 2 === 0) ? Brown : White;
+      ctx.fillStyle = color;
+      ctx.fillRect(col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+
+      if (selected_pos &&
+          selected_pos[0] === row && selected_pos[1] === col) {
+        ctx.fillStyle = Yellow;
+        ctx.fillRect(col * SQUARE_SIZE, row * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+      }
+    }
+  }
+}
+
+function draw_highlights(moves) {
+  for (const move of moves) {
+    const r = move[0];
+    const c = move[1];
+    const target_piece = board[r][c];
+
+    const cx = c * SQUARE_SIZE + SQUARE_SIZE / 2;
+    const cy = r * SQUARE_SIZE + SQUARE_SIZE / 2;
+
+    if (target_piece === null) {
+      // зелёный круг
+      ctx.beginPath();
+      ctx.arc(cx, cy, SQUARE_SIZE / 6, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(50, 205, 50, 0.7)";
+      ctx.fill();
+    } else {
+      // зелёный прямоугольник
+      ctx.fillStyle = "rgba(50, 205, 50, 0.6)";
+      ctx.fillRect(c * SQUARE_SIZE, r * SQUARE_SIZE, SQUARE_SIZE, SQUARE_SIZE);
+    }
+  }
+}
+
+function draw_piece() {
+  for (let row = 0; row < row_7; row++) {
+    for (let col = 0; col < col_6; col++) {
+      const piece = board[row][col];
+      if (piece && piece.image && piece.image.complete && piece.image.naturalWidth > 0) {
+        ctx.drawImage(
+          piece.image,
+          col * SQUARE_SIZE + 10,
+          row * SQUARE_SIZE + 10,
+          SQUARE_SIZE - 20,
+          SQUARE_SIZE - 20
+        );
+      }
+    }
+  }
+}
+
+// ================== ЛОГИКА ==================
+function clown_is_dying(clown) {
+  let direction = (clown.color === 'white') ? 1 : -1;
+  const start_r = clown.row;
+  const start_c = clown.col;
+  let curr_r = start_r;
+
+  for (let step = 0; step < 3; step++) {
+    const next_r = curr_r + direction;
+    if (!(next_r >= 0 && next_r < row_7)) {
+      direction *= -1;
+      const next_r2 = curr_r + direction;
+      if (!(next_r2 >= 0 && next_r2 < row_7)) {
+        return [null, null, false];
+      }
+      curr_r = next_r2;
+      break;
+    } else {
+      curr_r = next_r;
+    }
+  }
+
+  const max_steps = 50;
+  let steps = 0;
+  while (steps < max_steps) {
+    const landing_piece = board[curr_r][start_c];
+
+    if (landing_piece === null || landing_piece.color !== clown.color) {
+      return [curr_r, start_c, true];
+    }
+
+    if (landing_piece.color === clown.color) {
+      const next_r = curr_r + direction;
+      if (!(next_r >= 0 && next_r < row_7)) {
+        direction *= -1;
+        const next_r2 = curr_r + direction;
+        if (!(next_r2 >= 0 && next_r2 < row_7)) {
+          return [null, null, false];
+        }
+        curr_r = next_r2;
+        steps++;
+        continue;
+      } else {
+        curr_r = next_r;
+        steps++;
+        continue;
+      }
+    }
+  }
+  return [null, null, false];
+}
+
+function get_valid_moves(piece, start_row, start_col) {
+  const moves = [];
+
+  if (piece.type === "warrior") {
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (dr === 0 && dc === 0) continue;
+        let r = start_row + dr;
+        let c = start_col + dc;
+        if (r >= 0 && r < row_7 && c >= 0 && c < col_6 &&
+            (board[r][c] === null || board[r][c].color !== piece.color)) {
+          moves.push([r, c]);
+
+          if ((piece.color === 'white' && (start_row + start_col) % 2 === 1) ||
+              (piece.color === 'black' && (start_row + start_col) % 2 === 0)) {
+            let count_moves = 0;
+            while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+              if (board[r][c] === null) {
+                moves.push([r, c]);
+                count_moves++;
+                if (count_moves >= 2) break;
+              } else if (board[r][c].color !== piece.color) {
+                moves.push([r, c]);
+                break;
+              } else if (board[r][c].color === piece.color) {
+                break;
+              }
+              r += dr;
+              c += dc;
+            }
+          }
+        }
+      }
+    }
+  }
+  else if (piece.type === "guard") {
+    const dirs = [[1,1],[1,-1],[-1,1],[-1,-1]];
+    for (const [dr, dc] of dirs) {
+      let r = start_row + dr;
+      let c = start_col + dc;
+      while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+        const target = board[r][c];
+        if (target === null) {
+          moves.push([r, c]);
+        } else if (target.color !== piece.color) {
+          moves.push([r, c]);
+          break;
+        } else {
+          break;
+        }
+        r += dr;
+        c += dc;
+      }
+    }
+    if (!piece.special_move_used) {
+      const ortho = [[1,0],[-1,0],[0,1],[0,-1]];
+      for (const [dr, dc] of ortho) {
+        const r = start_row + dr;
+        const c = start_col + dc;
+        if (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+          const target = board[r][c];
+          if (target === null || target.color !== piece.color) {
+            moves.push([r, c]);
+          }
+        }
+      }
+    }
+  }
+  else if (piece.type === "dragon") {
+    const current_mode = game_state[piece.color].mode;
+    const dirs = [[1,1],[1,-1],[-1,1],[-1,-1],[1,0],[0,1],[-1,0],[0,-1]];
+    for (const [dr, dc] of dirs) {
+      let r = start_row + dr;
+      let c = start_col + dc;
+      const is_diagonal = (dr !== 0 && dc !== 0);
+      const is_orthogonal = ((dr === 0 || dc === 0) && (dr !== 0 || dc !== 0));
+
+      if (is_diagonal && current_mode === 0) {
+        while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+          if (board[r][c] === null) {
+            moves.push([r, c]);
+          } else if (board[r][c].color !== piece.color) {
+            moves.push([r, c]);
+            break;
+          } else {
+            break;
+          }
+          r += dr;
+          c += dc;
+        }
+      } else if (is_orthogonal && current_mode === 1) {
+        while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+          if (board[r][c] === null) {
+            moves.push([r, c]);
+          } else if (board[r][c].color !== piece.color) {
+            moves.push([r, c]);
+            break;
+          } else {
+            break;
+          }
+          r += dr;
+          c += dc;
+        }
+      }
+    }
+  }
+  else if (piece.type === "queen") {
+    let our_color = 0;
+    if ((piece.color === 'white' && (start_row + start_col) % 2 === 1) ||
+        (piece.color === 'black' && (start_row + start_col) % 2 === 0)) {
+      our_color = 1;
+    }
+    const dirs = [[-1,0],[1,0],[0,-1],[0,1],[1,1],[1,-1],[-1,1],[-1,-1]];
+    for (const [dr, dc] of dirs) {
+      let r = start_row + dr;
+      let c = start_col + dc;
+
+      const is_ortho = (dr === 0 || dc === 0) && (dr !== 0 || dc !== 0);
+      if (is_ortho) {
+        if (r >= 0 && r < row_7 && c >= 0 && c < col_6 &&
+            (board[r][c] === null || board[r][c].color !== piece.color)) {
+          moves.push([r, c]);
+          let count_moves = 0;
+          while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+            if (board[r][c] === null) {
+              moves.push([r, c]);
+              count_moves++;
+              if ((count_moves - our_color) >= 2) break;
+            } else if (board[r][c].color !== piece.color) {
+              moves.push([r, c]);
+              break;
+            } else if (board[r][c].color === piece.color) {
+              break;
+            }
+            r += dr;
+            c += dc;
+          }
+        }
+      } else {
+        if (r >= 0 && r < row_7 && c >= 0 && c < col_6 &&
+            (board[r][c] === null || board[r][c].color !== piece.color)) {
+          moves.push([r, c]);
+          let count_moves = 0;
+          while (r >= 0 && r < row_7 && c >= 0 && c < col_6) {
+            if (board[r][c] === null) {
+              moves.push([r, c]);
+              count_moves++;
+              if ((count_moves - our_color) >= 1) break;
+            } else if (board[r][c].color !== piece.color) {
+              moves.push([r, c]);
+              break;
+            } else if (board[r][c].color === piece.color) {
+              break;
+            }
+            r += dr;
+            c += dc;
+          }
+        }
+      }
+    }
+  }
+  else if (piece.type === 'clown') {
+    const direction = (piece.color === 'white') ? -1 : 1;
+    let count_moves = 1;
+    if ((piece.color === 'white' && (start_row + start_col) % 2 === 1) ||
+        (piece.color === 'black' && (start_row + start_col) % 2 === 0)) {
+      count_moves = 0;
+    }
+    let sr = start_row;
+    while (sr + direction >= 0 && sr + direction < row_7) {
+      if (board[sr + direction][start_col] === null) {
+        moves.push([sr + direction, start_col]);
+        count_moves++;
+        if (count_moves >= 2) break;
+      } else if (board[sr + direction][start_col].color !== piece.color) {
+        moves.push([sr + direction, start_col]);
+        break;
+      } else if (board[sr + direction][start_col].color === piece.color) {
+        break;
+      }
+      sr += direction;
+    }
+  }
+
+  return moves;
+}
+
+function make_move(piece, to_row, to_col) {
+  const from_row = piece.row;
+  const from_col = piece.col;
+  const board_r_c = board[to_row][to_col];
+  board[from_row][from_col] = null;
+
+  const dr = to_row - from_row;
+  const dc = to_col - from_col;
+
+  if (piece.type === "guard") {
+    if ((dr !== 0 && dc === 0) || (dr === 0 && dc !== 0)) {
+      piece.special_move_used = true;
+      piece.image = images[`guard_${piece.color}_used`];
+    }
+  }
+  if (piece.type === "dragon") {
+    const is_diagonal_move = (dr !== 0 && dc !== 0);
+    if (is_diagonal_move) {
+      game_state[piece.color].mode = 1;
+      piece.image = images[`dragon_${piece.color}_ver`];
+    } else {
+      game_state[piece.color].mode = 0;
+      piece.image = images[`dragon_${piece.color}_dia`];
+    }
+  }
+
+  if (board_r_c !== null && board_r_c.type === 'clown') {
+    const c_start_r = board_r_c.row;
+    const c_start_c = board_r_c.col;
+
+    if (board_r_c.lives <= 0) {
+      piece.row = c_start_r;
+      piece.col = c_start_c;
+      board[c_start_r][c_start_c] = piece;
+      piece.has_moved = true;
+      return;
+    }
+
+    board[c_start_r][c_start_c] = null;
+
+    const [landed_r, landed_c, survived] = clown_is_dying(board_r_c);
+
+    if (!survived) {
+      piece.row = c_start_r;
+      piece.col = c_start_c;
+      board[c_start_r][c_start_c] = piece;
+      piece.has_moved = true;
+      return;
+    }
+
+    board_r_c.lives -= 1;
+    board_r_c.image = images[`clown_${board_r_c.color}_1`];
+
+    if (board_r_c.lives <= 0) {
+      piece.row = c_start_r;
+      piece.col = c_start_c;
+      board[c_start_r][c_start_c] = piece;
+      piece.has_moved = true;
+      return;
+    }
+
+    piece.row = c_start_r;
+    piece.col = c_start_c;
+    board[c_start_r][c_start_c] = piece;
+    piece.has_moved = true;
+
+    const enemy_on_landing = board[landed_r][landed_c];
+
+    if (enemy_on_landing !== null) {
+      if (enemy_on_landing.type === 'clown') {
+        board[landed_r][landed_c] = null;
+        const [other_r, other_c, other_survived] = clown_is_dying(enemy_on_landing);
+
+        if (!other_survived) {
+          enemy_on_landing.lives = 0;
+        } else {
+          enemy_on_landing.lives -= 1;
+          enemy_on_landing.image = images[`clown_${enemy_on_landing.color}_1`];
+
+          if (!(enemy_on_landing.lives <= 0)) {
+            board[other_r][other_c] = enemy_on_landing;
+            enemy_on_landing.row = other_r;
+            enemy_on_landing.col = other_c;
+          }
+        }
+      } else {
+        board[landed_r][landed_c] = null;
+      }
+    }
+
+    board[landed_r][landed_c] = board_r_c;
+    board_r_c.row = landed_r;
+    board_r_c.col = landed_c;
+    return;
+  }
+
+  piece.row = to_row;
+  piece.col = to_col;
+  board[to_row][to_col] = piece;
+  piece.has_moved = true;
+}
+
+function handle_click(pos) {
+  const col = Math.floor(pos[0] / SQUARE_SIZE);
+  const row = Math.floor(pos[1] / SQUARE_SIZE);
+
+  if (row < 0 || row >= row_7 || col < 0 || col >= col_6) return;
+
+  if (selected_piece === null) {
+    const piece = board[row][col];
+    if (piece && piece.color === current_player) {
+      selected_piece = piece;
+      selected_pos = [row, col];
+      valid_moves_cache = get_valid_moves(selected_piece, row, col);
+    }
+  } else {
+    let is_valid = false;
+    for (const m of valid_moves_cache) {
+      if (m[0] === row && m[1] === col) {
+        is_valid = true;
+        break;
+      }
+    }
+    if (is_valid) {
+      make_move(selected_piece, row, col);
+      current_player = (current_player === 'white') ? 'black' : 'white';
+    }
+    selected_piece = null;
+    selected_pos = null;
+    valid_moves_cache = [];
+  }
+}
+
+// ================== СОБЫТИЯ ==================
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  const x = (e.clientX - rect.left) * scaleX;
+  const y = (e.clientY - rect.top) * scaleY;
+  handle_click([x, y]);
+});
+
+// ================== ГЛАВНЫЙ ЦИКЛ ==================
+function main() {
+  function loop() {
+    ctx.clearRect(0, 0, WIDTH, HIGHT);
+    draw_board();
+    draw_highlights(valid_moves_cache);
+    draw_piece();
+    requestAnimationFrame(loop);
+  }
+  loop();
+}
+
+</script>
+</body>
+</html>
